@@ -5,6 +5,7 @@ Authenticated users get full threads scoped by their id. Guests (the
 threaded under a guest namespace. Only saving trips requires an account.
 """
 
+import logging
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -13,6 +14,8 @@ from pydantic import BaseModel, field_validator
 from app.agent.service import run_agent_turn
 from app.auth.deps import get_optional_user
 from app.auth.ratelimit import guest_chat_limiter
+
+logger = logging.getLogger("yatra.agent")
 
 router = APIRouter(prefix="/api", tags=["agent"])
 
@@ -59,5 +62,8 @@ def chat(
         )
         result["guest"] = guest
         return result
-    except Exception as exc:
-        raise HTTPException(500, f"Agent error: {exc}")
+    except Exception:
+        logger.exception("agent turn failed (thread=%s owner=%s)", thread_id, owner)
+        raise HTTPException(
+            500, "The agent hit an error generating a response. Please retry."
+        )

@@ -1,6 +1,7 @@
 """Graph nodes: requirements extraction → planning → verification."""
 
 import json
+import logging
 from typing import Any
 
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
@@ -74,6 +75,8 @@ def _msg_text(msg) -> str:
 
 _PLAN_MARKERS = ("# ✈️", "## 🧠 Trip Summary", "# Your Personalized Trip Plan")
 
+logger = logging.getLogger("yatra.graph")
+
 
 def assemble_reply(messages) -> str:
     """Join AI text produced for the latest human turn into one reply.
@@ -134,12 +137,16 @@ def create_extract_node():
     def extract_requirements(state):
         user_message = _latest_human_message(state)
         previous = state.get("requirements") or {}
+        prefs = state.get("profile_prefs")
 
         prompt = EXTRACTION_PROMPT.replace(
             "{user_message}", user_message
         ).replace(
             "{previous_requirements}",
             json.dumps(previous, indent=2) if previous else "none",
+        ).replace(
+            "{profile_prefs}",
+            json.dumps(prefs, indent=2, default=str) if prefs else "none",
         )
 
         try:
@@ -153,6 +160,14 @@ def create_extract_node():
 
         # Clarify only for the initial request; a replan turn (existing
         # requirements) resolves ambiguity against the current plan.
+        logger.info(
+            "node=extract plan_request=%s clarify=%s dest=%s budget=%s",
+            req.is_plan_request,
+            req.needs_clarification,
+            req_dict.get("destination"),
+            req_dict.get("budget_total"),
+        )
+
         if (
             req.needs_clarification
             and req.clarifying_question
@@ -179,8 +194,12 @@ def create_planner_node(tools):
 
     def planner(state):
         requirements = state.get("requirements") or {}
+        prefs = state.get("profile_prefs")
         system = SYSTEM_PROMPT.replace(
             "{requirements_json}", json.dumps(requirements, indent=2)
+        ).replace(
+            "{profile_prefs}",
+            json.dumps(prefs, indent=2, default=str) if prefs else "none",
         )
 
         messages = state.get("messages", [])
@@ -206,7 +225,15 @@ def create_planner_node(tools):
         if not getattr(response, "tool_calls", None) and not _msg_text(
             response
         ).strip():
+            logger.warning("node=planner empty response — retrying once")
             response = llm.invoke(invoke_messages)
+
+        calls = [tc["name"] for tc in getattr(response, "tool_calls", None) or []]
+        logger.info(
+            "node=planner tool_calls=%s reply_chars=%d",
+            calls,
+            len(_msg_text(response)),
+        )
 
         update: dict[str, Any] = {"messages": [response]}
         if not getattr(response, "tool_calls", None):
@@ -255,10 +282,14 @@ def create_verify_node(max_loops: int):
             )
 
         if issues and verify_count <= max_loops:
+            logger.info(
+                "node=verify FAILED attempt=%d issues=%s", verify_count, issues
+            )
             return {
                 "verify_count": verify_count,
                 "validation_feedback": "\n".join(f"- {i}" for i in issues),
             }
+        logger.info("node=verify passed attempt=%d", verify_count)
         return {"verify_count": verify_count, "validation_feedback": None}
 
     return verify

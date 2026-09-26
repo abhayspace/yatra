@@ -20,3 +20,7 @@ class AgentState(TypedDict, total=False):
 
     # Bounded verify→plan refinement loop counter.
     verify_count: int
+
+    # Saved travel-profile preferences loaded at the service layer
+    # (None for guests). Used as labeled defaults during planning.
+    profile_prefs: dict[str, Any] | None

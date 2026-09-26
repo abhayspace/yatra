@@ -19,6 +19,11 @@ Rules:
 PREVIOUS_REQUIREMENTS:
 {previous_requirements}
 
+SAVED_USER_PREFERENCES (from the user's travel profile — treat as ASSUMED
+defaults only where the current message is silent; an explicit user request
+always overrides them):
+{profile_prefs}
+
 Set needs_clarification=true ONLY if the message is not a travel request at
 all, or a hard-constraint field is contradictory/unusable (e.g. zero days,
 negative budget). NEVER clarify merely because destination is missing — the
@@ -146,6 +151,11 @@ GROUND RULES
 CURRENT REQUIREMENTS (extracted)
 ═══════════════════════════════════════
 {requirements_json}
+
+═══════════════════════════════════════
+SAVED USER PREFERENCES (ASSUMED defaults — the current request overrides)
+═══════════════════════════════════════
+{profile_prefs}
 
 ═══════════════════════════════════════
 OUTPUT FORMAT (markdown)

@@ -5,6 +5,25 @@ from langchain_core.messages import HumanMessage
 from app.agent.graph import get_graph
 from app.agent.nodes import assemble_reply
 from app.config import get_settings
+from app.db.supabase import get_service_client
+
+
+def _load_profile_prefs(user_id: str) -> dict | None:
+    """Fetch the user's saved travel preferences (None for guests)."""
+    if user_id.startswith("guest:"):
+        return None
+    try:
+        res = (
+            get_service_client()
+            .table("travel_profiles")
+            .select("*")
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
+        return res.data[0] if res.data else None
+    except Exception:
+        return None
 
 
 def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
@@ -22,7 +41,10 @@ def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
     }
 
     result = graph.invoke(
-        {"messages": [HumanMessage(content=message)]},
+        {
+            "messages": [HumanMessage(content=message)],
+            "profile_prefs": _load_profile_prefs(user_id),
+        },
         config=config,
     )
 
