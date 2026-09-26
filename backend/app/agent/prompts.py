@@ -19,11 +19,12 @@ Rules:
 PREVIOUS_REQUIREMENTS:
 {previous_requirements}
 
-Set needs_clarification=true ONLY if a missing fact would significantly
-change the plan AND cannot be reasonably assumed (e.g. no origin city at
-all). Otherwise make a reasonable assumption and note it in `assumptions`.
-Budget, duration and travelers default sensibly if the user clearly does not
-care — record the assumption."""
+Set needs_clarification=true ONLY if the message is not a travel request at
+all, or a hard-constraint field is contradictory/unusable (e.g. zero days,
+negative budget). NEVER clarify merely because destination is missing — the
+planner handles destination shortlisting and recommendation itself. Budget,
+duration and travelers default sensibly if the user clearly does not care —
+record the assumption in `assumptions`."""
 
 
 VERIFICATION_PROMPT = """You are the feasibility-verification stage of a travel planning agent.
@@ -154,6 +155,11 @@ OUTPUT FORMAT (markdown)
 
 ## 🧠 Trip Summary
 Destination / Duration / Travelers / Budget / Travel Style / Main Interests
+
+## 🎯 Destination Options
+Include ONLY when the user did not name a destination: a comparison table
+of 2–4 candidates (Travel Cost | Travel Time | Budget Fit | Match to
+Interests) and one line on why the recommended destination won.
 
 ## 💰 Budget Breakdown
 | Category | Estimated Cost |

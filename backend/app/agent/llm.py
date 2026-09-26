@@ -16,4 +16,15 @@ def get_llm():
             temperature=0,
         )
 
+    if provider == "gemini":
+        if not settings.gemini_api_key:
+            raise RuntimeError("GEMINI_API_KEY is not configured")
+        from langchain_google_genai import ChatGoogleGenerativeAI
+
+        return ChatGoogleGenerativeAI(
+            model=settings.gemini_model,
+            google_api_key=settings.gemini_api_key,
+            temperature=0,
+        )
+
     raise ValueError(f"Unsupported LLM provider: {settings.llm_provider}")

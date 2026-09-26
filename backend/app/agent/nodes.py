@@ -128,7 +128,9 @@ def create_planner_node(tools):
                 HumanMessage(
                     content=(
                         "Your previous draft failed verification. "
-                        f"Fix these issues and produce the corrected plan:\n{feedback}"
+                        f"Fix these issues:\n{feedback}\n\n"
+                        "Output the COMPLETE corrected plan in the required "
+                        "format — every section, start to finish."
                     )
                 )
             )
