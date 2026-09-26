@@ -1,42 +1,17 @@
-import { useEffect, useState } from 'react'
 import { Link, useNavigate, useParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Layout from '../components/Layout'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
+import { deleteTrip, getTrip } from '../lib/trips'
 
 export default function TripDetail() {
   const { id } = useParams()
-  const { user } = useAuth()
   const navigate = useNavigate()
-  const [trip, setTrip] = useState(null)
-  const [loading, setLoading] = useState(true)
+  const trip = getTrip(id)
 
-  useEffect(() => {
-    if (!user) return
-    supabase
-      .from('saved_trips')
-      .select('*')
-      .eq('id', id)
-      .maybeSingle()
-      .then(({ data }) => {
-        setTrip(data)
-        setLoading(false)
-      })
-  }, [id, user])
-
-  async function deleteTrip() {
-    await supabase.from('saved_trips').delete().eq('id', id)
+  function remove() {
+    deleteTrip(id)
     navigate('/trips')
-  }
-
-  if (loading) {
-    return (
-      <Layout>
-        <div className="page-center"><div className="spinner" /></div>
-      </Layout>
-    )
   }
 
   if (!trip) {
@@ -71,7 +46,7 @@ export default function TripDetail() {
                 🔄 Re-plan this trip
               </Link>
             )}
-            <button className="btn btn-danger" onClick={deleteTrip}>
+            <button className="btn btn-danger" onClick={remove}>
               Delete
             </button>
           </div>

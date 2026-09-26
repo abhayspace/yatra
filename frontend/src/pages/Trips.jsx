@@ -1,33 +1,15 @@
-import { useEffect, useState } from 'react'
 import { Link } from 'react-router-dom'
 import Layout from '../components/Layout'
-import { useAuth } from '../context/AuthContext'
-import { supabase } from '../lib/supabase'
+import { listTrips } from '../lib/trips'
 
 export default function Trips() {
-  const { user } = useAuth()
-  const [trips, setTrips] = useState([])
-  const [loading, setLoading] = useState(true)
-
-  useEffect(() => {
-    if (!user) return
-    supabase
-      .from('saved_trips')
-      .select('id, trip_name, origin, destination, start_date, end_date, budget, created_at')
-      .order('created_at', { ascending: false })
-      .then(({ data }) => {
-        setTrips(data || [])
-        setLoading(false)
-      })
-  }, [user])
+  const trips = listTrips()
 
   return (
     <Layout>
       <div className="dashboard">
         <h1>My Trips</h1>
-        {loading ? (
-          <div className="spinner" />
-        ) : trips.length === 0 ? (
+        {trips.length === 0 ? (
           <div className="empty-state">
             <p>No saved trips yet.</p>
             <Link to="/plan" className="btn btn-primary">Plan your first trip</Link>

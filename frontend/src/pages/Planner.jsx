@@ -3,9 +3,8 @@ import { useSearchParams } from 'react-router-dom'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import Layout from '../components/Layout'
-import { useAuth } from '../context/AuthContext'
 import { apiFetch } from '../lib/api'
-import { supabase } from '../lib/supabase'
+import { saveTrip } from '../lib/trips'
 
 const SUGGESTIONS = [
   'Plan a 5-day trip from Delhi for 2 people under ₹50,000, focused on nature and food, with a relaxed itinerary.',
@@ -14,7 +13,6 @@ const SUGGESTIONS = [
 ]
 
 export default function Planner() {
-  const { session, guest } = useAuth()
   const [params] = useSearchParams()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -22,7 +20,6 @@ export default function Planner() {
   const [threadId, setThreadId] = useState(params.get('thread') || null)
   const [requirements, setRequirements] = useState(null)
   const [saved, setSaved] = useState(false)
-  const [saveNudge, setSaveNudge] = useState(false)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -41,7 +38,6 @@ export default function Planner() {
     try {
       const data = await apiFetch('/api/chat', {
         method: 'POST',
-        token: session?.access_token,
         body: { message, thread_id: threadId },
       })
       if (!threadId) setThreadId(data.thread_id)
@@ -57,17 +53,13 @@ export default function Planner() {
     }
   }
 
-  async function saveTrip() {
-    if (!session?.user) {
-      setSaveNudge(true)
-      return
-    }
+  function saveCurrentTrip() {
     const lastPlan = [...messages].reverse().find((m) => m.role === 'assistant')
     if (!lastPlan) return
 
     const req = requirements || {}
-    const { error } = await supabase.from('saved_trips').insert({
-      user_id: session.user.id,
+    saveTrip({
+      id: crypto.randomUUID(),
       trip_name: req.destination
         ? `${req.destination} trip`
         : lastPlan.content.slice(0, 40).replace(/[#*]/g, '').trim(),
@@ -78,7 +70,7 @@ export default function Planner() {
       itinerary: lastPlan.content,
       thread_id: threadId,
     })
-    if (!error) setSaved(true)
+    setSaved(true)
   }
 
   return (
@@ -123,20 +115,11 @@ export default function Planner() {
           <div ref={bottomRef} />
         </div>
 
-        {saveNudge && !session?.user && (
-          <div className="save-nudge-wrap">
-            <div className="save-nudge">
-              Create a free account to save trips.{' '}
-              <a href="/register">Sign up →</a>
-            </div>
-          </div>
-        )}
-
         <div className="chat-input-bar">
           {threadId && messages.length > 0 && (
             <button
               className="btn btn-ghost"
-              onClick={saveTrip}
+              onClick={saveCurrentTrip}
               disabled={saved || busy}
             >
               {saved ? '✓ Saved' : '💾 Save trip'}

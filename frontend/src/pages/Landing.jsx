@@ -1,22 +1,12 @@
-import { Link, useNavigate } from 'react-router-dom'
-import { useAuth } from '../context/AuthContext'
+import { Link } from 'react-router-dom'
 
 export default function Landing() {
-  const { continueAsGuest } = useAuth()
-  const navigate = useNavigate()
-
-  function skip() {
-    continueAsGuest()
-    navigate('/plan')
-  }
-
   return (
     <div className="landing">
       <nav className="landing-nav">
         <span className="brand">✈️ Yatra AI</span>
         <div>
-          <Link to="/login" className="btn btn-ghost">Log in</Link>
-          <Link to="/register" className="btn btn-primary">Get started</Link>
+          <Link to="/plan" className="btn btn-primary">Start planning</Link>
         </div>
       </nav>
 
@@ -30,12 +20,12 @@ export default function Landing() {
           adapts when your plans change.
         </p>
         <div className="hero-cta">
-          <Link to="/register" className="btn btn-primary btn-lg">
-            Plan my first trip →
+          <Link to="/plan" className="btn btn-primary btn-lg">
+            Plan my trip →
           </Link>
-          <button className="btn btn-ghost btn-lg" onClick={skip}>
-            Try without an account
-          </button>
+          <Link to="/trips" className="btn btn-ghost btn-lg">
+            My saved trips
+          </Link>
         </div>
 
         <div className="demo-prompt">
