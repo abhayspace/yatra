@@ -1,0 +1,187 @@
+"""Graph nodes: requirements extraction → planning → verification."""
+
+import json
+from typing import Any
+
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
+from pydantic import BaseModel, Field
+
+from app.agent.llm import get_llm
+from app.agent.prompts import (
+    EXTRACTION_PROMPT,
+    SYSTEM_PROMPT,
+    VERIFICATION_PROMPT,
+)
+
+
+# ── Structured schemas ───────────────────────────────────────────────────
+
+class TravelRequirements(BaseModel):
+    """Structured travel constraints extracted from the conversation."""
+
+    origin: str | None = None
+    destination: str | None = None
+    travel_dates: str | None = None
+    duration_days: int | None = None
+    travelers: int | None = None
+    budget_total: float | None = None
+    currency: str | None = None
+    traveler_type: str | None = None
+    interests: list[str] = Field(default_factory=list)
+    food_preferences: str | None = None
+    accommodation_preferences: str | None = None
+    transportation_preferences: str | None = None
+    pace: str | None = None
+    accessibility: str | None = None
+    must_visit: list[str] = Field(default_factory=list)
+    avoid: list[str] = Field(default_factory=list)
+    other_constraints: list[str] = Field(default_factory=list)
+    assumptions: list[str] = Field(default_factory=list)
+    needs_clarification: bool = False
+    clarifying_question: str | None = None
+    is_plan_request: bool = True
+
+
+class PlanVerification(BaseModel):
+    passed: bool
+    issues: list[str] = Field(default_factory=list)
+    claimed_total_cost: float | None = None
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────
+
+def _latest_human_message(state) -> str:
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, HumanMessage):
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+def _latest_ai_text(state) -> str:
+    for msg in reversed(state.get("messages", [])):
+        if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
+            content = msg.content
+            return content if isinstance(content, str) else str(content)
+    return ""
+
+
+# ── Node factories ───────────────────────────────────────────────────────
+
+def create_extract_node():
+    llm = get_llm()
+    extractor = llm.with_structured_output(TravelRequirements)
+
+    def extract_requirements(state):
+        user_message = _latest_human_message(state)
+        previous = state.get("requirements") or {}
+
+        prompt = EXTRACTION_PROMPT.replace(
+            "{user_message}", user_message
+        ).replace(
+            "{previous_requirements}",
+            json.dumps(previous, indent=2) if previous else "none",
+        )
+
+        try:
+            req: TravelRequirements = extractor.invoke(prompt)
+        except Exception:
+            # Extraction failure must not break the conversation — degrade
+            # to planning directly on the raw conversation.
+            return {"requirements": previous, "needs_clarification": False}
+
+        req_dict = req.model_dump()
+
+        # Clarify only for the initial request; a replan turn (existing
+        # requirements) resolves ambiguity against the current plan.
+        if (
+            req.needs_clarification
+            and req.clarifying_question
+            and req.is_plan_request
+        ):
+            return {
+                "requirements": req_dict,
+                "needs_clarification": True,
+                "messages": [AIMessage(content=req.clarifying_question)],
+            }
+
+        return {"requirements": req_dict, "needs_clarification": False}
+
+    return extract_requirements
+
+
+def create_planner_node(tools):
+    llm = get_llm().bind_tools(tools)
+
+    def planner(state):
+        requirements = state.get("requirements") or {}
+        system = SYSTEM_PROMPT.replace(
+            "{requirements_json}", json.dumps(requirements, indent=2)
+        )
+
+        messages = state.get("messages", [])
+        invoke_messages: list[Any] = [SystemMessage(content=system), *messages]
+
+        feedback = state.get("validation_feedback")
+        if feedback:
+            invoke_messages.append(
+                HumanMessage(
+                    content=(
+                        "Your previous draft failed verification. "
+                        f"Fix these issues and produce the corrected plan:\n{feedback}"
+                    )
+                )
+            )
+
+        response = llm.invoke(invoke_messages)
+
+        update: dict[str, Any] = {"messages": [response]}
+        if not getattr(response, "tool_calls", None):
+            # A final (non-tool) response was drafted — clear feedback.
+            update["validation_feedback"] = None
+        return update
+
+    return planner
+
+
+def create_verify_node(max_loops: int):
+    llm = get_llm()
+    verifier = llm.with_structured_output(PlanVerification)
+
+    def verify(state):
+        plan = _latest_ai_text(state)
+        requirements = state.get("requirements") or {}
+        verify_count = state.get("verify_count", 0) + 1
+
+        if not plan or not requirements.get("is_plan_request", True):
+            return {"verify_count": verify_count}
+
+        budget = requirements.get("budget_total")
+        issues: list[str] = []
+
+        try:
+            result: PlanVerification = verifier.invoke(
+                VERIFICATION_PROMPT.replace(
+                    "{requirements}", json.dumps(requirements, indent=2)
+                ).replace("{plan}", plan)
+            )
+            issues.extend(result.issues)
+            claimed = result.claimed_total_cost
+        except Exception:
+            claimed = None
+
+        # Deterministic budget check — never silently pass an over-budget plan.
+        if budget is not None and claimed is not None and claimed > budget:
+            issues.append(
+                f"Stated total {claimed:g} exceeds the hard budget of "
+                f"{budget:g}. Cut the largest cost drivers and recalculate."
+            )
+
+        if issues and verify_count <= max_loops:
+            return {
+                "verify_count": verify_count,
+                "validation_feedback": "\n".join(f"- {i}" for i in issues),
+            }
+        return {"verify_count": verify_count, "validation_feedback": None}
+
+    return verify

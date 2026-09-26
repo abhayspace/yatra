@@ -1,0 +1,23 @@
+# Secrets — never commit
+.env
+.env.local
+
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Node
+node_modules/
+dist/
+
+# Data
+*.sqlite
+*.db
+data/
+
+# OS / IDE
+.DS_Store
+.vscode/
+.idea/

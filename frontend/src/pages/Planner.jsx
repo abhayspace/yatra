@@ -1,0 +1,154 @@
+import { useEffect, useRef, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import Layout from '../components/Layout'
+import { useAuth } from '../context/AuthContext'
+import { apiFetch } from '../lib/api'
+import { supabase } from '../lib/supabase'
+
+const SUGGESTIONS = [
+  'Plan a 5-day trip from Delhi for 2 people under ₹50,000, focused on nature and food, with a relaxed itinerary.',
+  'Weekend getaway from Mumbai for a couple, budget ₹15,000, beaches and seafood.',
+  '7-day family trip to Kerala, 4 people, ₹80,000, moderate pace.',
+]
+
+export default function Planner() {
+  const { session } = useAuth()
+  const [params] = useSearchParams()
+  const [messages, setMessages] = useState([])
+  const [input, setInput] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [threadId, setThreadId] = useState(params.get('thread') || null)
+  const [requirements, setRequirements] = useState(null)
+  const [saved, setSaved] = useState(false)
+  const bottomRef = useRef(null)
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
+  }, [messages, busy])
+
+  async function send(text) {
+    const message = (text ?? input).trim()
+    if (!message || busy) return
+
+    setInput('')
+    setSaved(false)
+    setMessages((m) => [...m, { role: 'user', content: message }])
+    setBusy(true)
+
+    try {
+      const data = await apiFetch('/api/chat', {
+        method: 'POST',
+        token: session?.access_token,
+        body: { message, thread_id: threadId },
+      })
+      if (!threadId) setThreadId(data.thread_id)
+      if (data.requirements) setRequirements(data.requirements)
+      setMessages((m) => [...m, { role: 'assistant', content: data.reply }])
+    } catch (err) {
+      setMessages((m) => [
+        ...m,
+        { role: 'assistant', content: `⚠️ ${err.message}` },
+      ])
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function saveTrip() {
+    const lastPlan = [...messages].reverse().find((m) => m.role === 'assistant')
+    if (!lastPlan || !session?.user) return
+
+    const req = requirements || {}
+    const { error } = await supabase.from('saved_trips').insert({
+      user_id: session.user.id,
+      trip_name: req.destination
+        ? `${req.destination} trip`
+        : lastPlan.content.slice(0, 40).replace(/[#*]/g, '').trim(),
+      origin: req.origin || null,
+      destination: req.destination || null,
+      travelers: req.travelers || null,
+      budget: req.budget_total || null,
+      itinerary: lastPlan.content,
+      thread_id: threadId,
+    })
+    if (!error) setSaved(true)
+  }
+
+  return (
+    <Layout>
+      <div className="planner">
+        <div className="chat-area">
+          {messages.length === 0 && (
+            <div className="chat-empty">
+              <h2>Plan your trip</h2>
+              <p className="muted">
+                Tell me where, when, who and how much — I'll handle the rest.
+              </p>
+              {SUGGESTIONS.map((s) => (
+                <button
+                  key={s}
+                  className="suggestion"
+                  onClick={() => send(s)}
+                >
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {messages.map((m, i) => (
+            <div key={i} className={`msg msg-${m.role}`}>
+              {m.role === 'assistant' ? (
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                  {m.content}
+                </ReactMarkdown>
+              ) : (
+                m.content
+              )}
+            </div>
+          ))}
+
+          {busy && (
+            <div className="msg msg-assistant">
+              <span className="typing">Yatra AI is planning…</span>
+            </div>
+          )}
+          <div ref={bottomRef} />
+        </div>
+
+        <div className="chat-input-bar">
+          {threadId && messages.length > 0 && (
+            <button
+              className="btn btn-ghost"
+              onClick={saveTrip}
+              disabled={saved || busy}
+            >
+              {saved ? '✓ Saved' : '💾 Save trip'}
+            </button>
+          )}
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                send()
+              }
+            }}
+            placeholder="Describe your trip… (Enter to send)"
+            rows={2}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={() => send()}
+            disabled={busy || !input.trim()}
+          >
+            Send
+          </button>
+        </div>
+      </div>
+    </Layout>
+  )
+}
