@@ -53,24 +53,79 @@ class PlanVerification(BaseModel):
 def _latest_human_message(state) -> str:
     for msg in reversed(state.get("messages", [])):
         if isinstance(msg, HumanMessage):
-            content = msg.content
-            return content if isinstance(content, str) else str(content)
+            return _msg_text(msg)
     return ""
+
+
+def _msg_text(msg) -> str:
+    """Extract plain text from a message (Gemini returns content as blocks)."""
+    content = msg.content
+    if isinstance(content, str):
+        return content
+    if isinstance(content, list):
+        parts = [
+            b.get("text", "")
+            for b in content
+            if isinstance(b, dict) and b.get("type") == "text"
+        ]
+        return "\n".join(p for p in parts if p)
+    return str(content)
+
+
+_PLAN_MARKERS = ("# ✈️", "## 🧠 Trip Summary", "# Your Personalized Trip Plan")
+
+
+def assemble_reply(messages) -> str:
+    """Join AI text produced for the latest human turn into one reply.
+
+    A plan may be split across multiple AIMessages when the model interleaves
+    a tool call mid-document (header in one message, continuation in the
+    next). If the final text is a standalone plan or conversational reply,
+    it is returned alone; otherwise it is merged onto the most recent
+    message that opened the plan.
+    """
+    last_human = -1
+    for i in range(len(messages) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            last_human = i
+            break
+    segment = messages[last_human + 1 :] if last_human >= 0 else messages
+
+    ai_texts = [
+        _msg_text(m)
+        for m in segment
+        if isinstance(m, AIMessage) and _msg_text(m).strip()
+    ]
+    if not ai_texts:
+        return ""
+
+    last = ai_texts[-1]
+    if any(marker in last for marker in _PLAN_MARKERS):
+        return last
+
+    for j in range(len(ai_texts) - 1, -1, -1):
+        if any(marker in ai_texts[j] for marker in _PLAN_MARKERS):
+            return "\n".join(ai_texts[j:])
+    return last
 
 
 def _latest_ai_text(state) -> str:
-    for msg in reversed(state.get("messages", [])):
-        if isinstance(msg, AIMessage) and not getattr(msg, "tool_calls", None):
-            content = msg.content
-            return content if isinstance(content, str) else str(content)
-    return ""
+    return assemble_reply(state.get("messages", []))
 
 
 # ── Node factories ───────────────────────────────────────────────────────
 
+def _with_retry(runnable):
+    """Retry transient LLM failures (e.g. free-tier 429s) with backoff."""
+    return runnable.with_retry(
+        stop_after_attempt=4,
+        wait_exponential_jitter=True,
+    )
+
+
 def create_extract_node():
     llm = get_llm()
-    extractor = llm.with_structured_output(TravelRequirements)
+    extractor = _with_retry(llm.with_structured_output(TravelRequirements))
 
     def extract_requirements(state):
         user_message = _latest_human_message(state)
@@ -111,7 +166,7 @@ def create_extract_node():
 
 
 def create_planner_node(tools):
-    llm = get_llm().bind_tools(tools)
+    llm = _with_retry(get_llm().bind_tools(tools))
 
     def planner(state):
         requirements = state.get("requirements") or {}
@@ -148,7 +203,7 @@ def create_planner_node(tools):
 
 def create_verify_node(max_loops: int):
     llm = get_llm()
-    verifier = llm.with_structured_output(PlanVerification)
+    verifier = _with_retry(llm.with_structured_output(PlanVerification))
 
     def verify(state):
         plan = _latest_ai_text(state)

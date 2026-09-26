@@ -25,14 +25,8 @@ export default function App() {
           </ProtectedRoute>
         }
       />
-      <Route
-        path="/plan"
-        element={
-          <ProtectedRoute>
-            <Planner />
-          </ProtectedRoute>
-        }
-      />
+      {/* /plan is public — guests can try the planner without an account */}
+      <Route path="/plan" element={<Planner />} />
       <Route
         path="/trips"
         element={

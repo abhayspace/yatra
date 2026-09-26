@@ -8,8 +8,13 @@ export default function Login() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
-  const { adoptSession } = useAuth()
+  const { adoptSession, continueAsGuest } = useAuth()
   const navigate = useNavigate()
+
+  function skip() {
+    continueAsGuest()
+    navigate('/plan')
+  }
 
   async function handleSubmit(e) {
     e.preventDefault()
@@ -67,6 +72,9 @@ export default function Login() {
           <span>
             New here? <Link to="/register">Create an account</Link>
           </span>
+          <button type="button" className="linklike" onClick={skip}>
+            Skip — explore as guest
+          </button>
         </div>
       </div>
     </div>

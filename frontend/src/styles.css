@@ -283,6 +283,42 @@ input:focus, textarea:focus { outline: 2px solid #bfdbfe; border-color: var(--pr
 /* ── Profile form ── */
 .profile-form { display: flex; flex-direction: column; gap: 0.9rem; margin-top: 1rem; }
 
+.linklike {
+  background: none;
+  border: none;
+  color: var(--primary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+.linklike:hover { color: var(--primary-dark); }
+
+.hero-cta { display: flex; gap: 0.75rem; justify-content: center; flex-wrap: wrap; }
+
+.guest-badge {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #92400e;
+  background: #fef3c7;
+  padding: 0.25rem 0.7rem;
+  border-radius: 99px;
+}
+
+.save-nudge-wrap {
+  padding: 0.5rem 1.5rem;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+}
+.save-nudge {
+  padding: 0.6rem 0.9rem;
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: var(--radius);
+  font-size: 0.88rem;
+  color: var(--primary-dark);
+}
+
 /* ── Misc ── */
 .page-center { display: flex; align-items: center; justify-content: center; min-height: 60vh; }
 .spinner {

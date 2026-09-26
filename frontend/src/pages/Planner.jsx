@@ -14,7 +14,7 @@ const SUGGESTIONS = [
 ]
 
 export default function Planner() {
-  const { session } = useAuth()
+  const { session, guest } = useAuth()
   const [params] = useSearchParams()
   const [messages, setMessages] = useState([])
   const [input, setInput] = useState('')
@@ -22,6 +22,7 @@ export default function Planner() {
   const [threadId, setThreadId] = useState(params.get('thread') || null)
   const [requirements, setRequirements] = useState(null)
   const [saved, setSaved] = useState(false)
+  const [saveNudge, setSaveNudge] = useState(false)
   const bottomRef = useRef(null)
 
   useEffect(() => {
@@ -57,8 +58,12 @@ export default function Planner() {
   }
 
   async function saveTrip() {
+    if (!session?.user) {
+      setSaveNudge(true)
+      return
+    }
     const lastPlan = [...messages].reverse().find((m) => m.role === 'assistant')
-    if (!lastPlan || !session?.user) return
+    if (!lastPlan) return
 
     const req = requirements || {}
     const { error } = await supabase.from('saved_trips').insert({
@@ -117,6 +122,15 @@ export default function Planner() {
           )}
           <div ref={bottomRef} />
         </div>
+
+        {saveNudge && !session?.user && (
+          <div className="save-nudge-wrap">
+            <div className="save-nudge">
+              Create a free account to save trips.{' '}
+              <a href="/register">Sign up →</a>
+            </div>
+          </div>
+        )}
 
         <div className="chat-input-bar">
           {threadId && messages.length > 0 && (

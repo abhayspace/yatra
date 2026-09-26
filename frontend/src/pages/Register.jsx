@@ -3,24 +3,23 @@ import { Link, useNavigate } from 'react-router-dom'
 import { apiFetch } from '../lib/api'
 import { useAuth } from '../context/AuthContext'
 
-const STEPS = ['Email', 'Verify', 'Credentials']
+const STEPS = ['Details', 'Verify email']
 
 export default function Register() {
   const [step, setStep] = useState(0)
+  const [username, setUsername] = useState('')
   const [fullName, setFullName] = useState('')
   const [email, setEmail] = useState('')
-  const [otp, setOtp] = useState('')
-  const [setupToken, setSetupToken] = useState('')
-  const [username, setUsername] = useState('')
   const [password, setPassword] = useState('')
   const [confirm, setConfirm] = useState('')
+  const [otp, setOtp] = useState('')
   const [devOtp, setDevOtp] = useState('')
   const [error, setError] = useState('')
   const [info, setInfo] = useState('')
   const [busy, setBusy] = useState(false)
   const [cooldown, setCooldown] = useState(0)
 
-  const { adoptSession } = useAuth()
+  const { adoptSession, continueAsGuest } = useAuth()
   const navigate = useNavigate()
 
   function startCooldown() {
@@ -33,14 +32,24 @@ export default function Register() {
     }, 1000)
   }
 
-  async function submitEmail(e) {
+  async function submitDetails(e) {
     e.preventDefault()
     setError('')
+    if (password !== confirm) {
+      setError('Passwords do not match')
+      return
+    }
     setBusy(true)
     try {
       const data = await apiFetch('/api/auth/register', {
         method: 'POST',
-        body: { full_name: fullName.trim(), email: email.trim() },
+        body: {
+          username: username.trim(),
+          full_name: fullName.trim(),
+          email: email.trim(),
+          password,
+          confirm_password: confirm,
+        },
       })
       if (data.dev_otp) setDevOtp(data.dev_otp)
       setInfo(data.message || 'Verification code sent.')
@@ -58,13 +67,22 @@ export default function Register() {
     setError('')
     setBusy(true)
     try {
-      const data = await apiFetch('/api/auth/verify-otp', {
+      const { setup_token } = await apiFetch('/api/auth/verify-otp', {
         method: 'POST',
         body: { email: email.trim(), otp: otp.trim() },
       })
-      setSetupToken(data.setup_token)
-      setStep(2)
-      setInfo('')
+      // Password was collected in step 1 and held only in memory —
+      // finalize the account now that the email is verified.
+      const data = await apiFetch('/api/auth/setup-credentials', {
+        method: 'POST',
+        body: {
+          setup_token,
+          password,
+          confirm_password: password,
+        },
+      })
+      await adoptSession(data)
+      navigate('/dashboard')
     } catch (err) {
       setError(err.message)
     } finally {
@@ -87,31 +105,9 @@ export default function Register() {
     }
   }
 
-  async function submitCredentials(e) {
-    e.preventDefault()
-    setError('')
-    if (password !== confirm) {
-      setError('Passwords do not match')
-      return
-    }
-    setBusy(true)
-    try {
-      const data = await apiFetch('/api/auth/setup-credentials', {
-        method: 'POST',
-        body: {
-          setup_token: setupToken,
-          username: username.trim(),
-          password,
-          confirm_password: confirm,
-        },
-      })
-      await adoptSession(data)
-      navigate('/dashboard')
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setBusy(false)
-    }
+  function skip() {
+    continueAsGuest()
+    navigate('/plan')
   }
 
   return (
@@ -131,12 +127,23 @@ export default function Register() {
         {info && <div className="alert alert-info">{info}</div>}
         {devOtp && (
           <div className="alert alert-dev">
-            Dev mode — no email key configured. Your OTP: <b>{devOtp}</b>
+            Email delivery unavailable — dev code: <b>{devOtp}</b>
           </div>
         )}
 
         {step === 0 && (
-          <form onSubmit={submitEmail}>
+          <form onSubmit={submitDetails}>
+            <label>
+              Username
+              <input
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                required
+                pattern="[A-Za-z0-9_]{3,20}"
+                title="3–20 chars: letters, digits, underscore"
+                autoComplete="username"
+              />
+            </label>
             <label>
               Full name
               <input
@@ -144,6 +151,7 @@ export default function Register() {
                 onChange={(e) => setFullName(e.target.value)}
                 required
                 minLength={2}
+                autoComplete="name"
               />
             </label>
             <label>
@@ -154,58 +162,6 @@ export default function Register() {
                 onChange={(e) => setEmail(e.target.value)}
                 required
                 autoComplete="email"
-              />
-            </label>
-            <button className="btn btn-primary btn-block" disabled={busy}>
-              {busy ? 'Sending code…' : 'Send verification code'}
-            </button>
-          </form>
-        )}
-
-        {step === 1 && (
-          <form onSubmit={submitOtp}>
-            <p className="muted">
-              We emailed a 6-digit code to <b>{email}</b>. It expires in 10
-              minutes.
-            </p>
-            <label>
-              Verification code
-              <input
-                value={otp}
-                onChange={(e) => setOtp(e.target.value)}
-                required
-                inputMode="numeric"
-                pattern="\d{6}"
-                maxLength={6}
-                placeholder="000000"
-                className="otp-input"
-              />
-            </label>
-            <button className="btn btn-primary btn-block" disabled={busy}>
-              {busy ? 'Verifying…' : 'Verify email'}
-            </button>
-            <button
-              type="button"
-              className="btn btn-ghost btn-block"
-              onClick={resend}
-              disabled={cooldown > 0}
-            >
-              {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
-            </button>
-          </form>
-        )}
-
-        {step === 2 && (
-          <form onSubmit={submitCredentials}>
-            <label>
-              Username
-              <input
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                required
-                pattern="[A-Za-z0-9_]{3,20}"
-                title="3–20 chars: letters, digits, underscore"
-                autoComplete="username"
               />
             </label>
             <label>
@@ -230,15 +186,58 @@ export default function Register() {
               />
             </label>
             <p className="muted">
-              Min 8 characters, must contain letters and digits.
+              Password: min 8 characters with letters and digits.
             </p>
             <button className="btn btn-primary btn-block" disabled={busy}>
-              {busy ? 'Creating account…' : 'Create account'}
+              {busy ? 'Sending code…' : 'Continue'}
+            </button>
+          </form>
+        )}
+
+        {step === 1 && (
+          <form onSubmit={submitOtp}>
+            <p className="muted">
+              We emailed a 6-digit code to <b>{email}</b>. It expires in 10
+              minutes.
+            </p>
+            <label>
+              Verification code
+              <input
+                value={otp}
+                onChange={(e) => setOtp(e.target.value)}
+                required
+                inputMode="numeric"
+                pattern="\d{6}"
+                maxLength={6}
+                placeholder="000000"
+                className="otp-input"
+              />
+            </label>
+            <button className="btn btn-primary btn-block" disabled={busy}>
+              {busy ? 'Creating account…' : 'Verify & create account'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-block"
+              onClick={resend}
+              disabled={cooldown > 0}
+            >
+              {cooldown > 0 ? `Resend in ${cooldown}s` : 'Resend code'}
+            </button>
+            <button
+              type="button"
+              className="btn btn-ghost btn-block"
+              onClick={() => setStep(0)}
+            >
+              ← Change details
             </button>
           </form>
         )}
 
         <div className="auth-links">
+          <button type="button" className="linklike" onClick={skip}>
+            Skip — explore as guest
+          </button>
           <span>
             Already registered? <Link to="/login">Log in</Link>
           </span>

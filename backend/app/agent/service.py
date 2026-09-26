@@ -1,8 +1,9 @@
 """High-level agent invocation used by the API layer."""
 
-from langchain_core.messages import AIMessage, HumanMessage
+from langchain_core.messages import HumanMessage
 
 from app.agent.graph import get_graph
+from app.agent.nodes import assemble_reply
 from app.config import get_settings
 
 
@@ -25,15 +26,7 @@ def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
         config=config,
     )
 
-    reply = ""
-    for msg in reversed(result.get("messages", [])):
-        if isinstance(msg, AIMessage) and msg.content:
-            reply = (
-                msg.content
-                if isinstance(msg.content, str)
-                else str(msg.content)
-            )
-            break
+    reply = assemble_reply(result.get("messages", []))
 
     return {
         "reply": reply,

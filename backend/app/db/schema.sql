@@ -114,6 +114,7 @@ alter table public.email_otps enable row level security;
 create table if not exists public.pending_registrations (
   email       text primary key,
   full_name   text not null default '',
+  username    text not null default '',
   created_at  timestamptz not null default now()
 );
 

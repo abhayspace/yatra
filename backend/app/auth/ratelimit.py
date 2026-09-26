@@ -30,3 +30,6 @@ login_limiter = RateLimiter(max_attempts=5, window_seconds=60)
 
 # OTP endpoints: 3 requests per minute per email
 otp_limiter = RateLimiter(max_attempts=3, window_seconds=60)
+
+# Guest (unauthenticated) chat: 15 messages per hour per IP
+guest_chat_limiter = RateLimiter(max_attempts=15, window_seconds=3600)

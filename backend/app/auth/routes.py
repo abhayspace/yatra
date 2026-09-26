@@ -32,9 +32,29 @@ USERNAME_RE = re.compile(r"^[a-zA-Z0-9_]{3,20}$")
 
 # ── Schemas ──────────────────────────────────────────────────────────────
 
+def _password_check(v: str) -> str:
+    if len(v) < 8:
+        raise ValueError("Password must be at least 8 characters")
+    if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
+        raise ValueError("Password must contain letters and digits")
+    return v
+
+
 class RegisterRequest(BaseModel):
+    username: str
     full_name: str
     email: EmailStr
+    password: str
+    confirm_password: str
+
+    @field_validator("username")
+    @classmethod
+    def username_ok(cls, v: str) -> str:
+        if not USERNAME_RE.fullmatch(v):
+            raise ValueError(
+                "Username must be 3–20 chars: letters, digits, underscore"
+            )
+        return v
 
     @field_validator("full_name")
     @classmethod
@@ -43,6 +63,11 @@ class RegisterRequest(BaseModel):
         if not (2 <= len(v) <= 100):
             raise ValueError("Full name must be 2–100 characters")
         return v
+
+    @field_validator("password")
+    @classmethod
+    def pw_ok(cls, v: str) -> str:
+        return _password_check(v)
 
 
 class VerifyOtpRequest(BaseModel):
@@ -70,28 +95,16 @@ class ResendOtpRequest(BaseModel):
 
 
 class SetupCredentialsRequest(BaseModel):
+    """Username is carried inside the verified setup token, not the body."""
+
     setup_token: str
-    username: str
     password: str
     confirm_password: str
-
-    @field_validator("username")
-    @classmethod
-    def username_ok(cls, v: str) -> str:
-        if not USERNAME_RE.fullmatch(v):
-            raise ValueError(
-                "Username must be 3–20 chars: letters, digits, underscore"
-            )
-        return v
 
     @field_validator("password")
     @classmethod
     def password_ok(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
-            raise ValueError("Password must contain letters and digits")
-        return v
+        return _password_check(v)
 
 
 class LoginRequest(BaseModel):
@@ -111,21 +124,20 @@ class ResetPasswordRequest(BaseModel):
     @field_validator("new_password")
     @classmethod
     def password_ok(cls, v: str) -> str:
-        if len(v) < 8:
-            raise ValueError("Password must be at least 8 characters")
-        if not re.search(r"[A-Za-z]", v) or not re.search(r"\d", v):
-            raise ValueError("Password must contain letters and digits")
-        return v
+        return _password_check(v)
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
-def _issue_setup_token(email: str, full_name: str | None = None) -> str:
+def _issue_setup_token(
+    email: str, full_name: str | None = None, username: str | None = None
+) -> str:
     settings = get_settings()
     payload = {
         "sub": email,
         "purpose": "setup",
         "full_name": full_name or "",
+        "username": username or "",
         "exp": datetime.now(timezone.utc)
         + timedelta(seconds=settings.setup_token_ttl_seconds),
         "iat": datetime.now(timezone.utc),
@@ -207,11 +219,15 @@ def _session_payload(auth_response) -> dict:
 
 @router.post("/register")
 def register(body: RegisterRequest):
-    """Step 1 — collect name + email, send verification OTP."""
+    """Step 1 — username, name, email + password; then email OTP."""
     email = body.email.lower()
 
+    if body.password != body.confirm_password:
+        raise HTTPException(400, "Passwords do not match")
     if _email_registered(email):
         raise HTTPException(409, "An account with this email already exists.")
+    if _username_taken(body.username):
+        raise HTTPException(409, "Username is already taken.")
 
     if not otp_limiter.allow(f"register:{email}"):
         raise HTTPException(429, "Too many requests. Try again in a minute.")
@@ -220,10 +236,15 @@ def register(body: RegisterRequest):
     if error:
         raise HTTPException(429, error)
 
-    # Stash the name until verification completes; the setup token minted
-    # after OTP verification carries it into account creation.
+    # Stash name+username until verification completes; the setup token
+    # minted after OTP verification carries them into account creation.
+    # The password is never stored — the client re-sends it at setup time.
     get_service_client().table("pending_registrations").upsert(
-        {"email": email, "full_name": body.full_name}
+        {
+            "email": email,
+            "full_name": body.full_name,
+            "username": body.username,
+        }
     ).execute()
 
     sent = send_verification_otp(email, otp)
@@ -282,17 +303,18 @@ def verify_otp_route(body: VerifyOtpRequest):
     service = get_service_client()
     pending = (
         service.table("pending_registrations")
-        .select("full_name")
+        .select("full_name, username")
         .eq("email", email)
         .limit(1)
         .execute()
     )
     full_name = pending.data[0]["full_name"] if pending.data else ""
+    username = pending.data[0].get("username", "") if pending.data else ""
     service.table("pending_registrations").delete().eq("email", email).execute()
 
     return {
         "status": "verified",
-        "setup_token": _issue_setup_token(email, full_name),
+        "setup_token": _issue_setup_token(email, full_name, username),
     }
 
 
@@ -305,10 +327,13 @@ def setup_credentials(body: SetupCredentialsRequest):
     payload = _read_setup_token(body.setup_token)
     email = payload["sub"].lower()
     full_name = payload.get("full_name", "")
+    username = payload.get("username", "")
 
+    if not username or not USERNAME_RE.fullmatch(username):
+        raise HTTPException(400, "Setup token is missing a valid username")
     if _email_registered(email):
         raise HTTPException(409, "Account already exists. Please log in.")
-    if _username_taken(body.username):
+    if _username_taken(username):
         raise HTTPException(409, "Username is already taken.")
 
     service = get_service_client()
@@ -318,7 +343,7 @@ def setup_credentials(body: SetupCredentialsRequest):
             "password": body.password,
             "email_confirm": True,
             "user_metadata": {
-                "username": body.username,
+                "username": username,
                 "full_name": full_name,
             },
         }
@@ -333,7 +358,7 @@ def setup_credentials(body: SetupCredentialsRequest):
         {
             "id": user.id,
             "email": email,
-            "username": body.username,
+            "username": username,
             "full_name": full_name,
             "created_at": now,
             "updated_at": now,

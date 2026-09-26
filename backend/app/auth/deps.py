@@ -25,3 +25,12 @@ def get_current_user(
             detail="Invalid or expired session",
         )
     return user
+
+
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(bearer),
+):
+    """Return the user when a valid token is present, else None (guest)."""
+    if credentials is None:
+        return None
+    return get_user_from_token(credentials.credentials)
