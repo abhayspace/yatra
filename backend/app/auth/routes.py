@@ -226,7 +226,7 @@ def register(body: RegisterRequest):
         {"email": email, "full_name": body.full_name}
     ).execute()
 
-    send_verification_otp(email, otp)
+    sent = send_verification_otp(email, otp)
 
     settings = get_settings()
     response = {
@@ -234,8 +234,12 @@ def register(body: RegisterRequest):
         "message": f"Verification code sent to {email}",
         "expires_in": settings.otp_ttl_seconds,
     }
-    if settings.debug and not settings.resend_api_key:
-        response["dev_otp"] = otp  # local-dev convenience only
+    # Local-dev / delivery-failure fallback so the flow stays usable.
+    if settings.debug and not sent:
+        response["dev_otp"] = otp
+        response["message"] = (
+            f"Email delivery unavailable — dev code shown for {email}"
+        )
     return response
 
 
@@ -251,13 +255,13 @@ def resend_otp(body: ResendOtpRequest):
         raise HTTPException(429, error)
 
     if body.purpose == "verify":
-        send_verification_otp(email, otp)
+        sent = send_verification_otp(email, otp)
     else:
-        send_password_reset_otp(email, otp)
+        sent = send_password_reset_otp(email, otp)
 
     settings = get_settings()
     response = {"status": "otp_sent", "expires_in": settings.otp_ttl_seconds}
-    if settings.debug and not settings.resend_api_key:
+    if settings.debug and not sent:
         response["dev_otp"] = otp
     return response
 
