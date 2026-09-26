@@ -6,7 +6,7 @@ from typing import Any
 from langchain_core.messages import AIMessage, HumanMessage, SystemMessage
 from pydantic import BaseModel, Field
 
-from app.agent.llm import get_llm
+from app.agent.llm import get_llm_models
 from app.agent.prompts import (
     EXTRACTION_PROMPT,
     SYSTEM_PROMPT,
@@ -124,8 +124,12 @@ def _with_retry(runnable):
 
 
 def create_extract_node():
-    llm = get_llm()
-    extractor = _with_retry(llm.with_structured_output(TravelRequirements))
+    models = get_llm_models("light")
+    extractor = _with_retry(
+        models[0].with_structured_output(TravelRequirements).with_fallbacks(
+            [m.with_structured_output(TravelRequirements) for m in models[1:]]
+        )
+    )
 
     def extract_requirements(state):
         user_message = _latest_human_message(state)
@@ -166,7 +170,12 @@ def create_extract_node():
 
 
 def create_planner_node(tools):
-    llm = _with_retry(get_llm().bind_tools(tools))
+    models = get_llm_models("planner")
+    llm = _with_retry(
+        models[0].bind_tools(tools).with_fallbacks(
+            [m.bind_tools(tools) for m in models[1:]]
+        )
+    )
 
     def planner(state):
         requirements = state.get("requirements") or {}
@@ -192,6 +201,13 @@ def create_planner_node(tools):
 
         response = llm.invoke(invoke_messages)
 
+        # Some models occasionally return an empty final message (no text,
+        # no tool calls). Re-invoke once before accepting a dead end.
+        if not getattr(response, "tool_calls", None) and not _msg_text(
+            response
+        ).strip():
+            response = llm.invoke(invoke_messages)
+
         update: dict[str, Any] = {"messages": [response]}
         if not getattr(response, "tool_calls", None):
             # A final (non-tool) response was drafted — clear feedback.
@@ -202,8 +218,12 @@ def create_planner_node(tools):
 
 
 def create_verify_node(max_loops: int):
-    llm = get_llm()
-    verifier = _with_retry(llm.with_structured_output(PlanVerification))
+    models = get_llm_models("light")
+    verifier = _with_retry(
+        models[0].with_structured_output(PlanVerification).with_fallbacks(
+            [m.with_structured_output(PlanVerification) for m in models[1:]]
+        )
+    )
 
     def verify(state):
         plan = _latest_ai_text(state)

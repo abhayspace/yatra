@@ -27,6 +27,12 @@ def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
     )
 
     reply = assemble_reply(result.get("messages", []))
+    if not reply.strip():
+        reply = (
+            "I hit a snag generating that plan — the model returned an "
+            "empty response. Please try again; if it keeps happening, the "
+            "LLM quota may be exhausted for today."
+        )
 
     return {
         "reply": reply,
