@@ -1,7 +1,8 @@
 """Unit tests for the travel agent's tools — no network calls."""
 
-from app.agent.tools import _evaluate, calculate
 import ast
+
+from app.agent.tools import _evaluate, calculate
 
 
 def _eval_expr(expr: str):

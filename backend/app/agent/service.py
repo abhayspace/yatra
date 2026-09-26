@@ -1,7 +1,10 @@
 """High-level agent invocation used by the API layer."""
 
+import asyncio
+
 from langchain_core.messages import HumanMessage
 
+from app.agent.checkpoint import ensure_checkpointer_setup
 from app.agent.graph import get_graph
 from app.agent.nodes import assemble_reply
 from app.config import get_settings
@@ -26,7 +29,7 @@ def _load_profile_prefs(user_id: str) -> dict | None:
         return None
 
 
-def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
+async def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
     """Run one conversational turn of the planning agent.
 
     ``thread_id`` scopes the checkpointed conversation — reusing it enables
@@ -34,16 +37,19 @@ def run_agent_turn(user_id: str, thread_id: str, message: str) -> dict:
     """
     settings = get_settings()
     graph = get_graph()
+    await ensure_checkpointer_setup()
 
     config = {
         "configurable": {"thread_id": f"{user_id}:{thread_id}"},
         "recursion_limit": settings.agent_recursion_limit,
     }
 
-    result = graph.invoke(
+    result = await graph.ainvoke(
         {
             "messages": [HumanMessage(content=message)],
-            "profile_prefs": _load_profile_prefs(user_id),
+            "profile_prefs": await asyncio.to_thread(
+                _load_profile_prefs, user_id
+            ),
         },
         config=config,
     )

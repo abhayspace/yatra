@@ -5,12 +5,12 @@ import Layout from '../components/Layout'
 import { deleteTrip, getTrip } from '../lib/trips'
 
 export default function TripDetail() {
-  const { id } = useParams()
+  const { id } = useParams<{ id: string }>()
   const navigate = useNavigate()
-  const trip = getTrip(id)
+  const trip = id ? getTrip(id) : null
 
   function remove() {
-    deleteTrip(id)
+    if (id) deleteTrip(id)
     navigate('/trips')
   }
 

@@ -6,27 +6,48 @@ import Layout from '../components/Layout'
 import { apiFetch } from '../lib/api'
 import { saveTrip } from '../lib/trips'
 
-const SUGGESTIONS = [
+const SUGGESTIONS: string[] = [
   'Plan a 5-day trip from Delhi for 2 people under ₹50,000, focused on nature and food, with a relaxed itinerary.',
   'Weekend getaway from Mumbai for a couple, budget ₹15,000, beaches and seafood.',
   '7-day family trip to Kerala, 4 people, ₹80,000, moderate pace.',
 ]
 
+interface ChatMessage {
+  role: 'user' | 'assistant'
+  content: string
+}
+
+interface Requirements {
+  destination?: string | null
+  origin?: string | null
+  travelers?: number | null
+  budget_total?: number | null
+  [key: string]: unknown
+}
+
+interface ChatResponse {
+  reply: string
+  thread_id: string
+  requirements?: Requirements | null
+}
+
 export default function Planner() {
   const [params] = useSearchParams()
-  const [messages, setMessages] = useState([])
+  const [messages, setMessages] = useState<ChatMessage[]>([])
   const [input, setInput] = useState('')
   const [busy, setBusy] = useState(false)
-  const [threadId, setThreadId] = useState(params.get('thread') || null)
-  const [requirements, setRequirements] = useState(null)
+  const [threadId, setThreadId] = useState<string | null>(
+    params.get('thread')
+  )
+  const [requirements, setRequirements] = useState<Requirements | null>(null)
   const [saved, setSaved] = useState(false)
-  const bottomRef = useRef(null)
+  const bottomRef = useRef<HTMLDivElement | null>(null)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, busy])
 
-  async function send(text) {
+  async function send(text?: string) {
     const message = (text ?? input).trim()
     if (!message || busy) return
 
@@ -36,7 +57,7 @@ export default function Planner() {
     setBusy(true)
 
     try {
-      const data = await apiFetch('/api/chat', {
+      const data = await apiFetch<ChatResponse>('/api/chat', {
         method: 'POST',
         body: { message, thread_id: threadId },
       })
@@ -46,7 +67,7 @@ export default function Planner() {
     } catch (err) {
       setMessages((m) => [
         ...m,
-        { role: 'assistant', content: `⚠️ ${err.message}` },
+        { role: 'assistant', content: `⚠️ ${(err as Error).message}` },
       ])
     } finally {
       setBusy(false)
@@ -57,16 +78,16 @@ export default function Planner() {
     const lastPlan = [...messages].reverse().find((m) => m.role === 'assistant')
     if (!lastPlan) return
 
-    const req = requirements || {}
+    const req = requirements ?? {}
     saveTrip({
       id: crypto.randomUUID(),
       trip_name: req.destination
         ? `${req.destination} trip`
         : lastPlan.content.slice(0, 40).replace(/[#*]/g, '').trim(),
-      origin: req.origin || null,
-      destination: req.destination || null,
-      travelers: req.travelers || null,
-      budget: req.budget_total || null,
+      origin: req.origin ?? null,
+      destination: req.destination ?? null,
+      travelers: req.travelers ?? null,
+      budget: req.budget_total ?? null,
       itinerary: lastPlan.content,
       thread_id: threadId,
     })

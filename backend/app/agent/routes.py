@@ -36,7 +36,7 @@ class ChatRequest(BaseModel):
 
 
 @router.post("/chat")
-def chat(
+async def chat(
     body: ChatRequest,
     request: Request,
     user=Depends(get_optional_user),
@@ -47,7 +47,15 @@ def chat(
         owner = str(user.id)
         guest = False
     else:
-        ip = request.client.host if request.client else "unknown"
+        # Behind nginx+Cloudflare the direct peer is always 127.0.0.1.
+        # CF-Connecting-IP is set by Cloudflare from the real TCP peer and
+        # overwrites any client-spoofed value; X-Forwarded-For's first hop
+        # is client-controllable, so it is the weaker fallback.
+        ip = (
+            request.headers.get("cf-connecting-ip")
+            or request.headers.get("x-real-ip")
+            or (request.client.host if request.client else "unknown")
+        )
         if not guest_chat_limiter.allow(f"guest-chat:{ip}"):
             raise HTTPException(
                 429,
@@ -57,13 +65,13 @@ def chat(
         guest = True
 
     try:
-        result = run_agent_turn(
+        result = await run_agent_turn(
             user_id=owner, thread_id=thread_id, message=body.message
         )
         result["guest"] = guest
         return result
-    except Exception:
+    except Exception as exc:
         logger.exception("agent turn failed (thread=%s owner=%s)", thread_id, owner)
         raise HTTPException(
             500, "The agent hit an error generating a response. Please retry."
-        )
+        ) from exc

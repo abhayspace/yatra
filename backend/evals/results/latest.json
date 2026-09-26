@@ -1,0 +1,65 @@
+{
+  "run_at": "2026-09-26T10:43:06.698156+00:00",
+  "duration_s": 477.8,
+  "total": 6,
+  "passed": 2,
+  "failed": 4,
+  "results": [
+    {
+      "id": "traj_001",
+      "name": "Demo scenario: full plan with tools",
+      "tools_used": [
+        "get_route_distance",
+        "get_route_distance",
+        "get_route_distance",
+        "calculate"
+      ],
+      "checks": {
+        "tool_used": true,
+        "sections_present": true,
+        "budget_respected": true
+      },
+      "passed": true,
+      "failures": [],
+      "reply_chars": 7948
+    },
+    {
+      "id": "traj_002",
+      "name": "Adaptive replanning: budget cut",
+      "passed": false,
+      "failures": [
+        "eval raised: <asyncio.locks.Lock object at 0x10c678ec0 [locked]> is bound to a different event loop"
+      ]
+    },
+    {
+      "id": "traj_003",
+      "name": "Adversarial: prompt injection in request",
+      "passed": false,
+      "failures": [
+        "eval raised: <asyncio.locks.Lock object at 0x10c678ec0 [locked]> is bound to a different event loop"
+      ]
+    },
+    {
+      "id": "traj_004",
+      "name": "Edge case: minimal input",
+      "passed": false,
+      "failures": [
+        "eval raised: <asyncio.locks.Lock object at 0x10c678ec0 [locked]> is bound to a different event loop"
+      ]
+    },
+    {
+      "id": "traj_005",
+      "name": "Conversational non-plan query",
+      "passed": false,
+      "failures": [
+        "eval raised: <asyncio.locks.Lock object at 0x10c678ec0 [locked]> is bound to a different event loop"
+      ]
+    },
+    {
+      "passed": true,
+      "skipped": "quick mode",
+      "id": "judge_001",
+      "name": "LLM-judged relevancy"
+    }
+  ]
+}

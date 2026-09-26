@@ -21,6 +21,7 @@ logger = logging.getLogger("yatra.api")
 
 def create_app() -> FastAPI:
     settings = get_settings()
+    settings.validate_secrets()
 
     app = FastAPI(title="Yatra AI API", version="1.0.0")
 

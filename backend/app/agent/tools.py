@@ -2,8 +2,11 @@
 
 Design rules:
 - Only free, keyless, public APIs are used (Open-Meteo, Nominatim/OSM,
-  OSRM, Frankfurter). Every tool result is prefixed VERIFIED or ESTIMATED so
-  the model can label information honestly in the final plan.
+  OSRM, Frankfurter, Wikipedia REST). Every tool result is prefixed
+  VERIFIED or ESTIMATED so the model can label information honestly in
+  the final plan.
+- All I/O is async (httpx.AsyncClient) so tool batches run concurrently
+  inside the LangGraph tool node.
 - Tools never raise into the graph; failures return readable strings the
   planner can reason over.
 - The calculator is an AST walker — no eval/exec — inherited from the
@@ -13,7 +16,7 @@ Design rules:
 import ast
 import math
 import operator
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from langchain_core.tools import tool
@@ -78,16 +81,18 @@ def calculate(expression: str) -> str:
 @tool
 def get_current_time() -> str:
     """Get the current UTC time (ISO-8601)."""
-    return f"VERIFIED: {datetime.now(timezone.utc).isoformat()}"
+    return f"VERIFIED: {datetime.now(UTC).isoformat()}"
 
 
 # ── Geocoding helper ─────────────────────────────────────────────────────
 
-def _geocode(place: str) -> tuple[float, float, str] | None:
+async def _geocode(place: str) -> tuple[float, float, str] | None:
     """Return (lat, lon, display_name) via OSM Nominatim, or None."""
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HTTP_HEADERS) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={"q": place, "format": "json", "limit": 1},
             )
@@ -115,13 +120,13 @@ def _haversine_km(lat1, lon1, lat2, lon2) -> float:
 # ── Weather (Open-Meteo, no key) ─────────────────────────────────────────
 
 @tool
-def get_weather_forecast(city: str, days: int = 5) -> str:
+async def get_weather_forecast(city: str, days: int = 5) -> str:
     """Get a real daily weather forecast for a city (up to 16 days ahead).
 
     Returns daily max/min temperature, precipitation probability and a plain
     condition summary — use before scheduling outdoor activities.
     """
-    geo = _geocode(city)
+    geo = await _geocode(city)
     if not geo:
         return f"Could not geocode '{city}'. Weather unavailable."
 
@@ -129,8 +134,10 @@ def get_weather_forecast(city: str, days: int = 5) -> str:
     days = max(1, min(int(days), 16))
 
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HTTP_HEADERS) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
                 "https://api.open-meteo.com/v1/forecast",
                 params={
                     "latitude": lat,
@@ -166,13 +173,13 @@ def get_weather_forecast(city: str, days: int = 5) -> str:
 # ── Route distance (OSRM + haversine fallback) ───────────────────────────
 
 @tool
-def get_route_distance(origin: str, destination: str) -> str:
+async def get_route_distance(origin: str, destination: str) -> str:
     """Get road distance and driving time between two places.
 
     Falls back to a straight-line estimate if routing is unavailable.
     """
-    src = _geocode(origin)
-    dst = _geocode(destination)
+    src = await _geocode(origin)
+    dst = await _geocode(destination)
     if not src or not dst:
         return f"Could not geocode '{origin}' or '{destination}'."
 
@@ -180,8 +187,10 @@ def get_route_distance(origin: str, destination: str) -> str:
     lat2, lon2, name2 = dst
 
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HTTP_HEADERS) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
                 "https://router.project-osrm.org/route/v1/driving/"
                 f"{lon1},{lat1};{lon2},{lat2}",
                 params={"overview": "false"},
@@ -202,7 +211,7 @@ def get_route_distance(origin: str, destination: str) -> str:
         )
 
 
-# ── Places / POI search (Nominatim) ──────────────────────────────────────
+# ── Places / POI search (Overpass + Nominatim) ───────────────────────────
 
 _CATEGORY_FILTERS = [
     (
@@ -234,13 +243,14 @@ def _osm_filter_for(category: str) -> str:
 
 
 @tool
-def search_places(city: str, category: str) -> str:
-    """Find real named places in a city via OpenStreetMap.
+async def search_places(city: str, category: str) -> str:
+    """Find real named places in a city via OpenStreetMap, including any
+    recorded opening hours.
 
     category examples: 'tourist attractions', 'restaurants', 'parks',
     'hotels', 'markets'. Returns up to 8 named places.
     """
-    geo = _geocode(city)
+    geo = await _geocode(city)
     if not geo:
         return f"Could not geocode '{city}'. Place search unavailable."
 
@@ -254,8 +264,10 @@ def search_places(city: str, category: str) -> str:
     )
 
     try:
-        with httpx.Client(timeout=20.0, headers=_HTTP_HEADERS) as client:
-            resp = client.post(
+        async with httpx.AsyncClient(
+            timeout=20.0, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.post(
                 "https://overpass-api.de/api/interpreter",
                 content=query,
             )
@@ -263,23 +275,27 @@ def search_places(city: str, category: str) -> str:
     except Exception:
         elements = []
 
-    names = []
     seen = set()
+    places = []
     for el in elements:
-        n = (el.get("tags") or {}).get("name")
+        tags = el.get("tags") or {}
+        n = tags.get("name")
         if n and n not in seen:
             seen.add(n)
-            names.append(n)
+            hours = tags.get("opening_hours")
+            places.append(f"{n} (hours: {hours})" if hours else n)
 
-    if names:
+    if places:
         lines = [f"VERIFIED {category} near {name.split(',')[0]} (OpenStreetMap):"]
-        lines += [f"  - {n}" for n in names[:8]]
+        lines += [f"  - {p}" for p in places[:8]]
         return "\n".join(lines)
 
-    # Fallback: free-text search when Overpass has nothing/ is unreachable.
+    # Fallback: free-text search when Overpass has nothing/is unreachable.
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HTTP_HEADERS) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
                 "https://nominatim.openstreetmap.org/search",
                 params={
                     "q": f"{category} {name.split(',')[0]}",
@@ -301,14 +317,48 @@ def search_places(city: str, category: str) -> str:
     return "\n".join(lines)
 
 
+# ── Destination guide (Wikipedia REST, no key) ───────────────────────────
+
+@tool
+async def get_city_guide(city: str) -> str:
+    """Get a real destination summary from Wikipedia/Wikivoyage.
+
+    Use to ground destination choices — highlights, climate context and
+    notable facts from an editable-encyclopedia source.
+    """
+    title = city.strip().replace(" ", "_")
+    try:
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
+                "https://en.wikipedia.org/api/rest_v1/page/summary/" + title
+            )
+            data = resp.json()
+    except Exception as exc:
+        return f"Guide lookup failed: {exc}"
+
+    extract = data.get("extract")
+    if resp.status_code >= 400 or not extract:
+        return f"No guide entry found for '{city}'."
+
+    url = (data.get("content_urls") or {}).get("desktop", {}).get("page", "")
+    return (
+        f"VERIFIED guide for {data.get('title', city)} (Wikipedia{': ' + url if url else ''}):\n"
+        f"  {extract[:800]}"
+    )
+
+
 # ── Currency (Frankfurter / ECB rates, no key) ───────────────────────────
 
 @tool
-def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
+async def convert_currency(amount: float, from_currency: str, to_currency: str) -> str:
     """Convert an amount between currencies at live ECB reference rates."""
     try:
-        with httpx.Client(timeout=_TIMEOUT, headers=_HTTP_HEADERS) as client:
-            resp = client.get(
+        async with httpx.AsyncClient(
+            timeout=_TIMEOUT, headers=_HTTP_HEADERS
+        ) as client:
+            resp = await client.get(
                 "https://api.frankfurter.dev/v1/latest",
                 params={
                     "amount": amount,
@@ -336,5 +386,6 @@ def get_tools():
         get_weather_forecast,
         get_route_distance,
         search_places,
+        get_city_guide,
         convert_currency,
     ]

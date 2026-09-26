@@ -12,7 +12,7 @@ import argparse
 import json
 import sys
 import time
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 RESULTS_DIR = Path(__file__).resolve().parent / "results"
@@ -50,7 +50,7 @@ def main() -> int:
 
     passed = sum(1 for r in results if r["passed"])
     report = {
-        "run_at": datetime.now(timezone.utc).isoformat(),
+        "run_at": datetime.now(UTC).isoformat(),
         "duration_s": round(time.time() - started, 1),
         "total": len(results),
         "passed": passed,
@@ -59,7 +59,7 @@ def main() -> int:
     }
 
     RESULTS_DIR.mkdir(exist_ok=True)
-    out = RESULTS_DIR / f"eval_{datetime.now(timezone.utc):%Y%m%d_%H%M%S}.json"
+    out = RESULTS_DIR / f"eval_{datetime.now(UTC):%Y%m%d_%H%M%S}.json"
     out.write_text(json.dumps(report, indent=2))
     (RESULTS_DIR / "latest.json").write_text(json.dumps(report, indent=2))
 

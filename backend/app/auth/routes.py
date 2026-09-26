@@ -12,15 +12,15 @@ Passwords are never stored by us — hashing is delegated to Supabase Auth
 """
 
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import jwt
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, EmailStr, field_validator
 
+from app.auth.deps import get_current_user
 from app.auth.otp import issue_otp, verify_otp
 from app.auth.ratelimit import login_limiter, otp_limiter
-from app.auth.deps import get_current_user
 from app.config import get_settings
 from app.db.supabase import get_anon_client, get_service_client
 from app.email.service import send_password_reset_otp, send_verification_otp
@@ -138,9 +138,9 @@ def _issue_setup_token(
         "purpose": "setup",
         "full_name": full_name or "",
         "username": username or "",
-        "exp": datetime.now(timezone.utc)
+        "exp": datetime.now(UTC)
         + timedelta(seconds=settings.setup_token_ttl_seconds),
-        "iat": datetime.now(timezone.utc),
+        "iat": datetime.now(UTC),
     }
     return jwt.encode(payload, settings.backend_jwt_secret, algorithm="HS256")
 
@@ -152,7 +152,9 @@ def _read_setup_token(token: str) -> dict:
             token, settings.backend_jwt_secret, algorithms=["HS256"]
         )
     except jwt.PyJWTError:
-        raise HTTPException(400, "Setup session is invalid or expired. Start over.")
+        raise HTTPException(
+            400, "Setup session is invalid or expired. Start over."
+        ) from None
     if payload.get("purpose") != "setup":
         raise HTTPException(400, "Invalid setup token")
     return payload
@@ -250,17 +252,19 @@ def register(body: RegisterRequest):
     sent = send_verification_otp(email, otp)
 
     settings = get_settings()
+    if not sent and not settings.debug:
+        raise HTTPException(
+            503, "Email delivery failed — please try again shortly."
+        )
     response = {
         "status": "otp_sent",
-        "message": f"Verification code sent to {email}",
+        "message": (
+            f"Verification code sent to {email}"
+            if sent
+            else f"Email delivery unavailable — code logged server-side for {email}"
+        ),
         "expires_in": settings.otp_ttl_seconds,
     }
-    # Local-dev / delivery-failure fallback so the flow stays usable.
-    if settings.debug and not sent:
-        response["dev_otp"] = otp
-        response["message"] = (
-            f"Email delivery unavailable — dev code shown for {email}"
-        )
     return response
 
 
@@ -281,10 +285,11 @@ def resend_otp(body: ResendOtpRequest):
         sent = send_password_reset_otp(email, otp)
 
     settings = get_settings()
-    response = {"status": "otp_sent", "expires_in": settings.otp_ttl_seconds}
-    if settings.debug and not sent:
-        response["dev_otp"] = otp
-    return response
+    if not sent and not settings.debug:
+        raise HTTPException(
+            503, "Email delivery failed — please try again shortly."
+        )
+    return {"status": "otp_sent", "expires_in": settings.otp_ttl_seconds}
 
 
 @router.post("/verify-otp")
@@ -353,7 +358,7 @@ def setup_credentials(body: SetupCredentialsRequest):
         raise HTTPException(500, "Failed to create account")
 
     # Public profile + default travel profile (service role; RLS-safe writes).
-    now = datetime.now(timezone.utc).isoformat()
+    now = datetime.now(UTC).isoformat()
     service.table("users").insert(
         {
             "id": user.id,
@@ -400,7 +405,7 @@ def login(body: LoginRequest):
             {"email": email, "password": body.password}
         )
     except Exception:
-        raise HTTPException(401, "Invalid username or password")
+        raise HTTPException(401, "Invalid username or password") from None
 
     return _session_payload(session)
 

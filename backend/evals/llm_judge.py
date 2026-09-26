@@ -5,6 +5,7 @@ structured-output rubric — no external eval framework dependency, and the
 judge runs on the fallback chain so it works under free-tier quotas.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from uuid import uuid4
@@ -12,6 +13,7 @@ from uuid import uuid4
 from langchain_core.messages import HumanMessage
 from pydantic import BaseModel, Field
 
+from app.agent.checkpoint import ensure_checkpointer_setup
 from app.agent.graph import get_graph
 from app.agent.llm import get_llm_models
 from app.agent.nodes import assemble_reply
@@ -55,6 +57,13 @@ def _judge():
     return chain
 
 
+async def _invoke(graph, message: str, config: dict):
+    await ensure_checkpointer_setup()
+    return await graph.ainvoke(
+        {"messages": [HumanMessage(content=message)]}, config=config
+    )
+
+
 def eval_judged(case: dict, threshold: float = 7.0) -> dict:
     graph = get_graph()
     settings = get_settings()
@@ -62,9 +71,7 @@ def eval_judged(case: dict, threshold: float = 7.0) -> dict:
         "configurable": {"thread_id": f"eval-judge-{uuid4()}"},
         "recursion_limit": settings.agent_recursion_limit,
     }
-    result = graph.invoke(
-        {"messages": [HumanMessage(content=case["input"])]}, config=config
-    )
+    result = asyncio.run(_invoke(graph, case["input"], config))
     reply = assemble_reply(result["messages"])
 
     score: JudgeScore = _judge().invoke(

@@ -27,7 +27,8 @@ class Settings(BaseSettings):
     gemini_fallback_models: str = "gemini-3.5-flash-lite,gemini-3.1-flash-lite,gemini-flash-lite-latest"
 
     # Backend
-    backend_jwt_secret: str = "dev-insecure-secret"
+    # Required in non-debug mode — no insecure default shipped.
+    backend_jwt_secret: str = ""
     backend_cors_origins: str = "http://localhost:5173"
     sqlite_db_path: str = "data/checkpoints.sqlite"
     debug: bool = False
@@ -43,6 +44,13 @@ class Settings(BaseSettings):
     agent_max_verify_loops: int = 2
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+
+    def validate_secrets(self) -> None:
+        """Fail fast on missing secrets outside debug mode."""
+        if not self.debug and not self.backend_jwt_secret:
+            raise RuntimeError(
+                "BACKEND_JWT_SECRET must be set when DEBUG is disabled"
+            )
 
     @property
     def cors_origins(self) -> list[str]:

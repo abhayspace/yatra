@@ -14,7 +14,6 @@ from app.agent.prompts import (
     VERIFICATION_PROMPT,
 )
 
-
 # ── Structured schemas ───────────────────────────────────────────────────
 
 class TravelRequirements(BaseModel):
@@ -134,7 +133,7 @@ def create_extract_node():
         )
     )
 
-    def extract_requirements(state):
+    async def extract_requirements(state):
         user_message = _latest_human_message(state)
         previous = state.get("requirements") or {}
         prefs = state.get("profile_prefs")
@@ -150,7 +149,7 @@ def create_extract_node():
         )
 
         try:
-            req: TravelRequirements = extractor.invoke(prompt)
+            req: TravelRequirements = await extractor.ainvoke(prompt)
         except Exception:
             # Extraction failure must not break the conversation — degrade
             # to planning directly on the raw conversation.
@@ -192,7 +191,7 @@ def create_planner_node(tools):
         )
     )
 
-    def planner(state):
+    async def planner(state):
         requirements = state.get("requirements") or {}
         prefs = state.get("profile_prefs")
         system = SYSTEM_PROMPT.replace(
@@ -218,7 +217,7 @@ def create_planner_node(tools):
                 )
             )
 
-        response = llm.invoke(invoke_messages)
+        response = await llm.ainvoke(invoke_messages)
 
         # Some models occasionally return an empty final message (no text,
         # no tool calls). Re-invoke once before accepting a dead end.
@@ -226,7 +225,7 @@ def create_planner_node(tools):
             response
         ).strip():
             logger.warning("node=planner empty response — retrying once")
-            response = llm.invoke(invoke_messages)
+            response = await llm.ainvoke(invoke_messages)
 
         calls = [tc["name"] for tc in getattr(response, "tool_calls", None) or []]
         logger.info(
@@ -252,7 +251,7 @@ def create_verify_node(max_loops: int):
         )
     )
 
-    def verify(state):
+    async def verify(state):
         plan = _latest_ai_text(state)
         requirements = state.get("requirements") or {}
         verify_count = state.get("verify_count", 0) + 1
@@ -264,7 +263,7 @@ def create_verify_node(max_loops: int):
         issues: list[str] = []
 
         try:
-            result: PlanVerification = verifier.invoke(
+            result: PlanVerification = await verifier.ainvoke(
                 VERIFICATION_PROMPT.replace(
                     "{requirements}", json.dumps(requirements, indent=2)
                 ).replace("{plan}", plan)

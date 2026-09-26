@@ -10,7 +10,6 @@ from app.agent.graph import (
 )
 from app.agent.nodes import assemble_reply
 
-
 # ── Routing ──────────────────────────────────────────────────────────────
 
 def test_extract_routes_to_end_on_clarification():

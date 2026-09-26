@@ -9,7 +9,7 @@ the publishable key.
 import hashlib
 import hmac
 import secrets
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 from app.config import get_settings
@@ -17,7 +17,7 @@ from app.db.supabase import get_service_client
 
 
 def _now() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _hash(otp: str, salt: str) -> str:
